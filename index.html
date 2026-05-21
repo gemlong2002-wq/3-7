@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>澄鴻工程 OS - 總公司樞紐 (GitHub 版)</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <style>
+    body { background-color: #ffffff; color: #000000; overflow-x: hidden; }
+    .brutal-box { border: 4px solid #000000; box-shadow: 8px 8px 0px 0px #000000; transition: all 0.15s ease-in-out; background-color: #ffffff; }
+    .brutal-box:hover { box-shadow: 0px 0px 0px 0px #000000; transform: translate(8px, 8px); }
+    .brutal-input { border: 4px solid #000000; background-color: #ffffff; transition: all 0.2s; }
+    .brutal-input:focus { outline: none; background-color: #fef08a; box-shadow: 6px 6px 0px 0px #000000; transform: translate(-2px, -2px); }
+    .glitch-effect { animation: glitch 0.3s cubic-bezier(.25, .46, .45, .94) both infinite; color: red; }
+    @keyframes glitch { 0% { transform: translate(0) } 20% { transform: translate(-4px, 4px) } 40% { transform: translate(-4px, -4px) } 60% { transform: translate(4px, 4px) } 80% { transform: translate(4px, -4px) } 100% { transform: translate(0) } }
+    .pdf-mode { width: 1200px !important; margin: 0 auto !important; padding: 40px !important; background: white !important; }
+    .pdf-mode .brutal-box { box-shadow: none !important; border: 2px solid #000 !important; }
+    .pdf-mode .hide-on-print { display: none !important; }
+  </style>
+</head>
+<body class="bg-white min-h-screen font-sans selection:bg-black selection:text-white p-4 md:p-8">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // ==========================================
+    // ⚙️ 系統核心設定 (System Config)
+    // ==========================================
+    // ⚠️ 請將下方的網址替換為你 GAS 部署出來的 Web App URL
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycby_YOUR_SCRIPT_ID_HERE/exec"; 
+
+    // ==========================================
+    // 🌐 L2 虛擬代理引擎 (Proxy API Engine)
+    // ==========================================
+    // 攔截原本的 google.script.run，轉換為 Fetch POST 送給後端
+    const gsRun = () => {
+      let onSuccess = null;
+      let onFailure = null;
+      
+      const chain = {
+        withSuccessHandler: (cb) => { onSuccess = cb; return chain; },
+        withFailureHandler: (cb) => { onFailure = cb; return chain; }
+      };
+
+      return new Proxy(chain, {
+        get: (target, prop) => {
+          if (prop in target) return target[prop];
+          return async (...args) => {
+            try {
+              const res = await fetch(https://script.google.com/macros/s/AKfycbyhXKqYkZz3Twuks6bCT1o70L6C5N7cpQ967XVIF4Gj1FDTfbpCfE4_Vg2CUD_1KxRzYw/exec, {
+                method: 'POST',
+                body: JSON.stringify({ action: prop, args: args })
+              });
+              const json = await res.json();
+              if (json.status === 'error') throw new Error(json.message);
+              if (onSuccess) onSuccess(json.data);
+            } catch (err) {
+              if (onFailure) onFailure(err);
+              else console.error(`[REST API Error - ${prop}]:`, err);
+            }
+          };
+        }
+      });
+    };
+
+    class ErrorBoundary extends React.Component {
+      constructor(props) { super(props); this.state = { hasError: false, error: null, errorInfo: null }; }
+      componentDidCatch(error, errorInfo) { this.setState({ hasError: true, error, errorInfo }); }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="p-8 md:p-16 bg-red-900 text-white min-h-screen">
+              <h1 className="text-5xl font-black mb-6 border-b-8 border-white pb-4">🚨 系統渲染崩潰截斷 (System Crash Prevented) 🚨</h1>
+              <p className="text-xl font-bold mb-8">系統攔截了致命錯誤。這通常是 API 網址設定錯誤或欄位異常引起。</p>
+              <div className="bg-black p-6 font-mono text-yellow-300 text-sm border-4 border-yellow-300 overflow-x-auto">
+                {this.state.error && this.state.error.toString()}<br/><br/>
+                {this.state.errorInfo && this.state.errorInfo.componentStack}
+              </div>
+              <button onClick={() => window.location.reload()} className="mt-8 bg-white text-black px-6 py-3 text-xl font-black hover:bg-yellow-300 border-4 border-black">重啟系統 Restart (F5)</button>
+            </div>
+          );
+        }
+        return this.props.children; 
+      }
+    }
+
+    const IconPlus = () => <svg className="w-8 h-8 inline-block" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="square" d="M12 4v16m8-8H4"></path></svg>;
+    const IconTrash = () => <svg className="w-6 h-6 inline-block" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="square" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>;
+    const IconEdit = () => <svg className="w-6 h-6 inline-block" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="square" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>;
+    const IconSave = () => <svg className="w-6 h-6 inline-block" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="square" d="M5 13l4 4L19 7"></path></svg>;
+    const IconDownload = () => <svg className="w-8 h-8 inline-block" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="square" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>;
+    const IconLock = () => <svg className="w-24 h-24 mb-6 text-yellow-300 mx-auto inline-block" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="square" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>;
+    const IconUnlock = () => <svg className="w-8 h-8 inline-block" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="square" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>;
+    const IconCalculator = () => <svg className="w-16 h-16 inline-block text-black mr-4" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="square" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>;
+    const IconMoney = () => <svg className="w-16 h-16 inline-block text-black mr-4" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="square" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08-.402-2.599-1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>;
+
+    const generateUID = () => Math.random().toString(36).substr(2, 9);
+    const formatMoney = (amount) => Number(amount || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    const calculateGross = (amount) => Math.round(Number(amount) * 1.05);
+    const getCaseFullName = (rec) => { if (!rec || !rec._rowIndex) return rec?.caseName || ''; const serial = String(rec._rowIndex - 1).padStart(2, '0'); return `${serial} - ${rec.caseName}`; };
+    const calculateItemTotal = (subItems) => { if (!Array.isArray(subItems)) return 0; return subItems.reduce((acc, sub) => acc + (Number(sub?.price || 0) * Number(sub?.quantity || 1)), 0); };
+    const calculateKaohsiungFormula = (a, n) => { if (!a || a <= 0) return 0; const baseFee = Math.max(40000, (parseFloat(a)/500)*30000); const floorFee = (parseInt(n || 1)-1)*5000; return baseFee + floorFee; };
+
+    const ASSOCIATIONS = ['全國聯合會', '台灣省公會', '台北市公會', '新北市公會', '桃園市公會', '台中市公會', '台南市公會', '高雄市公會'];
+    const EN_ASSOCIATIONS = { '全國聯合會': 'Nat. Federation', '台灣省公會': 'Taiwan Guild', '台北市公會': 'Taipei Guild', '新北市公會': 'New Taipei Guild', '桃園市公會': 'Taoyuan Guild', '台中市公會': 'Taichung Guild', '台南市公會': 'Tainan Guild', '高雄市公會': 'Kaohsiung Guild' };
+
+    function App() {
+      // --- i18n 雙語引擎 ---
+      const [lang, setLang] = useState(() => localStorage.getItem('os_lang') || 'zh');
+      useEffect(() => { localStorage.setItem('os_lang', lang); }, [lang]);
+      const l = (zhText, enText) => lang === 'zh' ? zhText : enText;
+
+      const getDefaultRules = () => ({
+        guildDeductions: [
+          { id: generateUID(), name: l('公會行政費', 'Admin Fee'), amount: '' },
+          { id: generateUID(), name: l('代扣稅款', 'Tax'), amount: '' },
+          { id: generateUID(), name: l('補充保費', 'Premium'), amount: '' },
+          { id: generateUID(), name: l('匯費與雜支', 'Misc Fee'), amount: '' }
+        ],
+        hq: { 
+          core: l('統一簽約與法務、開立發票、維護公會籍、發包與支付外包/儀器廠商費用。', 'Centralized contracting, invoicing, guild maintenance, and outsourcing payments.'), 
+          fund: l('統進統出，由公司統一接收並扣除成本後，剩餘金額留存於公司行政專戶。', 'Centralized funds. Remaining amounts stay in HQ admin account after cost deduction.'), 
+          def: l('總部集權免責：合約一律由總部大小章確認，阻絕業務私下承諾。', 'HQ Authority: Contracts strictly confirmed by HQ to prevent unauthorized promises.') 
+        },
+        lead: { 
+          core: l('潛在客源開發與拜訪、初步需求確認與報價單遞交、業主關係維護。', 'Lead generation, requirement confirmation, quotation delivery, and client relations.'), 
+          fund: l('須待案件完全結束、公會核備且業主尾款結清後，發放給帶案人。', 'Distributed only after case closure, guild approval, and final client payment.'), 
+          def: l('呆帳防禦：剝奪簽約權，純做引流。若業主跑路未付尾款，此獎金同步取消。', 'Bad Debt Defense: No signing power. Bonus cancelled if client defaults.') 
+        },
+        exec: { 
+          core: l('現場會勘測量、彙整外包數據撰寫報告、安排簽證技師蓋章、協助公會掛件。', 'Site surveys, report writing, securing engineer signatures, and guild submission.'), 
+          fund: l('外部費用依約支付；內部勞務須待報告蓋章過關後發放。', 'External fees paid by contract; internal labor paid after report approval.'), 
+          def: l('後端盈虧自負：組主管須自負盈虧，強迫精算執行成本，並對最終報告負責。', 'P&L Responsibility: Dept heads manage own P&L and are fully responsible for reports.') 
+        }
+      });
+
+      const [isUnlocked, setIsUnlocked] = useState(false);
+      const [secureToken, setSecureToken] = useState(() => sessionStorage.getItem('os_secure_token') || null);
+      
+      useEffect(() => { if (secureToken) setIsUnlocked(true); }, [secureToken]);
+
+      const [currentView, setCurrentView] = useState(() => localStorage.getItem('currentView') || 'quotation');
+      const [isActualExpanded, setIsActualExpanded] = useState(() => { const stored = localStorage.getItem('isActualExpanded'); return stored !== null ? JSON.parse(stored) : true; });
+
+      useEffect(() => { localStorage.setItem('currentView', currentView); }, [currentView]);
+      useEffect(() => { localStorage.setItem('isActualExpanded', JSON.stringify(isActualExpanded)); }, [isActualExpanded]);
+
+      const [financeSettings, setFinanceSettings] = useState({ baseType: 'net', guildPercent: '', hqPercent: 30, leadPercent: 30, execPercent: 40, rules: getDefaultRules() });
+      const [isRulesEditing, setIsRulesEditing] = useState(false);
+
+      const [registry, setRegistry] = useState([]); // Initialized empty for GitHub headless load
+      const [selectedCase, setSelectedCase] = useState(null);
+      const [floors, setFloors] = useState([]);
+      const [additionalItems, setAdditionalItems] = useState([]); 
+      const [actualItems, setActualItems] = useState([]);         
+      
+      const [glitch, setGlitch] = useState(false);
+      const [isSyncing, setIsSyncing] = useState(false);
+      const [isExporting, setIsExporting] = useState(false);
+      const printRef = useRef();
+
+      const [newCase, setNewCase] = useState({ caseName: '', association: '高雄市公會', contractor: '', group: '', engineer: '', permitId: '', appraisalType: '' });
+      const [newFloor, setNewFloor] = useState({ floorName: '', area: '' });
+      const [newItem, setNewItem] = useState({ itemName: '', contact: '', phone: '', note: '', subItems: [{ _id: generateUID(), name: '', price: '', quantity: 1 }] });
+      const [editItemData, setEditItemData] = useState({});
+      const [newActualItem, setNewActualItem] = useState({ itemName: '', contact: '', phone: '', note: '', subItems: [{ _id: generateUID(), name: '', price: '', quantity: 1 }] });
+      const [editActualData, setEditActualData] = useState({});
+      
+      const [editingCaseId, setEditingCaseId] = useState(null);
+      const [editingFloorId, setEditingFloorId] = useState(null);
+      const [editFloorData, setEditFloorData] = useState({});
+      const [editingItemId, setEditingItemId] = useState(null);
+      const [editingActualId, setEditingActualId] = useState(null);
+
+      const triggerGlitch = () => { setGlitch(true); setTimeout(() => setGlitch(false), 800); };
+
+      const checkAuth = async (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        if (e && e.stopPropagation) e.stopPropagation();
+        
+        if (secureToken) return secureToken;
+
+        const token = window.prompt(l("⚠️ [系統鎖定]\n此操作需要最高權限，請輸入管理密碼：", "⚠️ [SYSTEM LOCKED]\nAdmin password required:"));
+        if (!token) return null;
+        
+        return new Promise((resolve) => {
+          gsRun().withSuccessHandler(isValid => {
+            if(isValid) { 
+              setSecureToken(token); 
+              setIsUnlocked(true); 
+              sessionStorage.setItem('os_secure_token', token);
+              resolve(token); 
+            } else { 
+              alert(l("密碼錯誤，拒絕存取。", "Invalid password. Access denied.")); triggerGlitch(); resolve(null); 
+            }
+          }).withFailureHandler(err => { alert(l("伺服器連線失敗：", "Connection failed: ") + err.message); resolve(null); }).checkPassword(token);
+        });
+      };
+
+      // ✨ Headless 架構：前端啟動時主動去拉取資料庫
+      useEffect(() => { 
+        if (registry.length === 0) { 
+          gsRun().withSuccessHandler(setRegistry).getCaseRegistry(); 
+        } 
+      }, []);
+
+      const loadCaseDetails = (rec) => {
+        if(editingCaseId === rec.id) return;
+        setSelectedCase(rec); setIsSyncing(true); setIsRulesEditing(false);
+        setFloors([]); setAdditionalItems([]); setActualItems([]);
+        gsRun().withSuccessHandler(res => {
+          setFloors(res.floors || []); 
+          setAdditionalItems(res.items || []); 
+          setActualItems(res.actualItems || []); 
+          setIsSyncing(false);
+          
+          let parsedRules = getDefaultRules();
+          try { 
+            if(rec.financeRules) {
+              const dbRules = JSON.parse(rec.financeRules);
+              parsedRules = { ...parsedRules, ...dbRules };
+              if (!parsedRules.guildDeductions) parsedRules.guildDeductions = getDefaultRules().guildDeductions;
+            } 
+          } catch(e) {}
+
+          setFinanceSettings({ 
+            baseType: rec.baseType || 'net', guildPercent: rec.guildPercent || '', 
+            hqPercent: rec.hqPercent !== undefined ? rec.hqPercent : 30, 
+            leadPercent: rec.leadPercent !== undefined ? rec.leadPercent : 30, 
+            execPercent: rec.execPercent !== undefined ? rec.execPercent : 40,
+            rules: parsedRules
+          });
+        }).getCaseDetails(rec.id);
+        setEditingCaseId(null); setEditingFloorId(null); setEditingItemId(null); setEditingActualId(null);
+      };
+
+      const handleExportPDF = async (e) => {
+        e.preventDefault();
+        if(isExporting) return; if(!selectedCase) return; const token = await checkAuth(); if(!token) return; 
+        setIsExporting(true); window.scrollTo(0, 0); 
+        setTimeout(() => {
+          const element = printRef.current;
+          window.html2canvas(element, { scale: 2, useCORS: true, windowWidth: 1200 }).then(canvas => {
+            const imgData = canvas.toDataURL('image/jpeg', 1.0);
+            const { jsPDF } = window.jspdf; const pdf = new jsPDF('landscape', 'mm', 'a4'); 
+            const canvasRatio = canvas.height / canvas.width; const pdfRatio = pdf.internal.pageSize.getHeight() / pdf.internal.pageSize.getWidth();
+            let w, h; if (canvasRatio > pdfRatio) { h = pdf.internal.pageSize.getHeight(); w = h / canvasRatio; } else { w = pdf.internal.pageSize.getWidth(); h = w * canvasRatio; }
+            pdf.addImage(imgData, 'JPEG', (pdf.internal.pageSize.getWidth() - w) / 2, (pdf.internal.pageSize.getHeight() - h) / 2, w, h);
+            pdf.save(`${l('報價單','Quotation')}_${getCaseFullName(selectedCase)}.pdf`); setIsExporting(false);
+          });
+        }, 800);
+      };
+
+      // --- CRUD Methods (替換為 Proxy Engine 呼叫) ---
+      const handleAddCase = async (e) => { e.preventDefault(); if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const tempId = 'temp_' + Date.now(); const nextIndex = registry.length > 0 ? registry[0]._rowIndex + 1 : 2; setRegistry(prev => [{ ...newCase, id: tempId, _rowIndex: nextIndex }, ...prev]); setNewCase({ caseName: '', association: '高雄市公會', contractor: '', group: '', engineer: '', permitId: '', appraisalType: '' }); gsRun().withSuccessHandler(real => { setRegistry(prev => prev.map(c => c.id === tempId ? real : c)); setIsSyncing(false); }).withFailureHandler(() => { triggerGlitch(); setIsSyncing(false); }).addCaseRegistry(newCase, token); };
+      const handleEditCase = async (e) => { e.preventDefault(); if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const original = registry.find(c => c.id === editingCaseId); setRegistry(prev => prev.map(c => c.id === editingCaseId ? editCaseData : c)); if (selectedCase?.id === editingCaseId) setSelectedCase(editCaseData); setEditingCaseId(null); gsRun().withSuccessHandler(()=>setIsSyncing(false)).withFailureHandler(err => { alert(err.message); triggerGlitch(); setRegistry(prev => prev.map(c => c.id === editCaseData.id ? original : c)); if(selectedCase?.id === editCaseData.id) setSelectedCase(original); setIsSyncing(false); }).updateCaseRegistry(editCaseData, token); };
+      const handleDeleteCase = async (id, e) => { e.stopPropagation(); if(isSyncing) return; if(confirm(l('確認註銷此案件？所有相關數據將被抹除。', 'Confirm delete? All data will be lost.'))) { const token = await checkAuth(); if(!token) return; setIsSyncing(true); const toRestore = registry.find(c => c.id === id); setRegistry(prev => prev.filter(c => c.id !== id)); if (selectedCase?.id === id) setSelectedCase(null); gsRun().withSuccessHandler(()=>setIsSyncing(false)).withFailureHandler(err => { alert(err.message); triggerGlitch(); setRegistry(prev => [toRestore, ...prev]); setIsSyncing(false); }).deleteCaseRegistry(id, token); } };
+      
+      const handleAddFloor = async (e) => { e.preventDefault(); if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const tempId = 'temp_f_' + Date.now(); const dataToAdd = { ...newFloor, caseId: selectedCase.id }; setFloors(prev => [...prev, { ...dataToAdd, id: tempId }]); setNewFloor({ floorName: '', area: '' }); gsRun().withSuccessHandler(real => { setFloors(prev => prev.map(i => i.id === tempId ? real : i)); setIsSyncing(false); }).addFloor(dataToAdd, token); };
+      const handleEditFloor = async (e) => { e.preventDefault(); if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const original = floors.find(f => f.id === editingFloorId); setFloors(prev => prev.map(f => f.id === editingFloorId ? editFloorData : f)); setEditingFloorId(null); gsRun().withSuccessHandler(()=>setIsSyncing(false)).withFailureHandler(err => { triggerGlitch(); setFloors(prev => prev.map(f => f.id === editFloorData.id ? original : f)); setIsSyncing(false); }).updateFloor(editFloorData, token); };
+      const handleDeleteFloor = async (id) => { if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const toRestore = floors.find(f => f.id === id); setFloors(prev => prev.filter(f => f.id !== id)); gsRun().withSuccessHandler(()=>setIsSyncing(false)).withFailureHandler(err => { triggerGlitch(); setFloors(prev => [...prev, toRestore]); setIsSyncing(false); }).deleteFloor(id, token); };
+
+      const handleNewSubItemChange = (idx, field, value) => { const newSubs = [...newItem.subItems]; newSubs[idx][field] = value; setNewItem({ ...newItem, subItems: newSubs }); };
+      const addNewSubItemRow = () => setNewItem({ ...newItem, subItems: [...newItem.subItems, { _id: generateUID(), name: '', price: '', quantity: 1 }] });
+      const removeNewSubItemRow = (idToRemove) => setNewItem({ ...newItem, subItems: newItem.subItems.filter((sub) => sub._id !== idToRemove) });
+      const handleEditSubItemChange = (idx, field, value) => { const newSubs = [...editItemData.subItems]; newSubs[idx][field] = value; setEditItemData({ ...editItemData, subItems: newSubs }); };
+      const addEditSubItemRow = () => setEditItemData({ ...editItemData, subItems: [...editItemData.subItems, { _id: generateUID(), name: '', price: '', quantity: 1 }] });
+      const removeEditSubItemRow = (idToRemove) => setEditItemData({ ...editItemData, subItems: editItemData.subItems.filter((sub) => sub._id !== idToRemove) });
+
+      const handleAddItem = async (e) => { e.preventDefault(); if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const tempId = 'temp_i_' + Date.now(); const dataToAdd = { ...newItem, caseId: selectedCase.id }; setAdditionalItems(prev => [{ ...dataToAdd, id: tempId }, ...prev]); setNewItem({ itemName: '', contact: '', phone: '', note: '', subItems: [{ _id: generateUID(), name: '', price: '', quantity: 1 }] }); gsRun().withSuccessHandler(real => { setAdditionalItems(prev => prev.map(i => i.id === tempId ? real : i)); setIsSyncing(false); }).addAdditionalItem(dataToAdd, token); };
+      const handleEditItem = async (e) => { e.preventDefault(); if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const original = additionalItems.find(i => i.id === editingItemId); setAdditionalItems(prev => prev.map(i => i.id === editingItemId ? editItemData : i)); setEditingItemId(null); gsRun().withSuccessHandler(()=>setIsSyncing(false)).withFailureHandler(err => { triggerGlitch(); setAdditionalItems(prev => prev.map(i => i.id === editItemData.id ? original : i)); setIsSyncing(false); }).updateAdditionalItem(editItemData, token); };
+      const handleDeleteItem = async (id) => { if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const toRestore = additionalItems.find(i => i.id === id); setAdditionalItems(prev => prev.filter(i => i.id !== id)); gsRun().withSuccessHandler(()=>setIsSyncing(false)).withFailureHandler(err => { triggerGlitch(); setAdditionalItems(prev => [toRestore, ...prev]); setIsSyncing(false); }).deleteAdditionalItem(id, token); };
+
+      const handleNewActualSubItemChange = (idx, field, value) => { const newSubs = [...newActualItem.subItems]; newSubs[idx][field] = value; setNewActualItem({ ...newActualItem, subItems: newSubs }); };
+      const addNewActualSubItemRow = () => setNewActualItem({ ...newActualItem, subItems: [...newActualItem.subItems, { _id: generateUID(), name: '', price: '', quantity: 1 }] });
+      const removeNewActualSubItemRow = (idToRemove) => setNewActualItem({ ...newActualItem, subItems: newActualItem.subItems.filter((sub) => sub._id !== idToRemove) });
+      const handleEditActualSubItemChange = (idx, field, value) => { const newSubs = [...editActualData.subItems]; newSubs[idx][field] = value; setEditActualData({ ...editActualData, subItems: newSubs }); };
+      const addEditActualSubItemRow = () => setEditActualData({ ...editActualData, subItems: [...editActualData.subItems, { _id: generateUID(), name: '', price: '', quantity: 1 }] });
+      const removeEditActualSubItemRow = (idToRemove) => setEditActualData({ ...editActualData, subItems: editActualData.subItems.filter((sub) => sub._id !== idToRemove) });
+
+      const handleAddActualItem = async (e) => { e.preventDefault(); if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const tempId = 'temp_a_' + Date.now(); const dataToAdd = { ...newActualItem, caseId: selectedCase.id }; setActualItems(prev => [{ ...dataToAdd, id: tempId }, ...prev]); setNewActualItem({ itemName: '', contact: '', phone: '', note: '', subItems: [{ _id: generateUID(), name: '', price: '', quantity: 1 }] }); gsRun().withSuccessHandler(real => { setActualItems(prev => prev.map(i => i.id === tempId ? real : i)); setIsSyncing(false); }).addActualItem(dataToAdd, token); };
+      const handleEditActualItem = async (e) => { e.preventDefault(); if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const original = actualItems.find(i => i.id === editingActualId); setActualItems(prev => prev.map(i => i.id === editingActualId ? editActualData : i)); setEditingActualId(null); gsRun().withSuccessHandler(()=>setIsSyncing(false)).withFailureHandler(err => { triggerGlitch(); setActualItems(prev => prev.map(i => i.id === editActualData.id ? original : i)); setIsSyncing(false); }).updateActualItem(editActualData, token); };
+      const handleDeleteActualItem = async (id) => { if(isSyncing) return; const token = await checkAuth(); if(!token) return; setIsSyncing(true); const toRestore = actualItems.find(i => i.id === id); setActualItems(prev => prev.filter(i => i.id !== id)); gsRun().withSuccessHandler(()=>setIsSyncing(false)).withFailureHandler(err => { triggerGlitch(); setActualItems(prev => [toRestore, ...prev]); setIsSyncing(false); }).deleteActualItem(id, token); };
+
+      const handleRuleChange = (category, field, value) => {
+        setFinanceSettings(prev => ({
+          ...prev, rules: { ...prev.rules, [category]: { ...prev.rules[category], [field]: value } }
+        }));
+      };
+
+      // 動態公會代扣陣列操作
+      const handleGuildDeductionChange = (idx, field, value) => {
+        setFinanceSettings(prev => {
+          const arr = [...(prev.rules.guildDeductions || [])];
+          arr[idx] = { ...arr[idx], [field]: value };
+          return { ...prev, rules: { ...prev.rules, guildDeductions: arr } };
+        });
+      };
+      const addGuildDeduction = () => {
+        setFinanceSettings(prev => {
+          const arr = [...(prev.rules.guildDeductions || [])];
+          arr.push({ id: generateUID(), name: '', amount: '' });
+          return { ...prev, rules: { ...prev.rules, guildDeductions: arr } };
+        });
+      };
+      const removeGuildDeduction = (idx) => {
+        setFinanceSettings(prev => {
+          const arr = [...(prev.rules.guildDeductions || [])];
+          arr.splice(idx, 1);
+          return { ...prev, rules: { ...prev.rules, guildDeductions: arr } };
+        });
+      };
+
+      const handleSaveFinanceSettings = async (e) => {
+        e.preventDefault(); 
+        if(isSyncing) return;
+        const token = await checkAuth(); if(!token) return;
+        setIsSyncing(true); setIsRulesEditing(false);
+        const payload = { ...financeSettings, id: selectedCase.id, financeRules: JSON.stringify(financeSettings.rules) };
+        gsRun()
+          .withSuccessHandler(() => {
+            setIsSyncing(false); alert(l('結算與分潤設定 (含自訂規範) 已成功存檔！', 'Settings saved successfully!'));
+            setRegistry(prev => prev.map(c => c.id === selectedCase.id ? {...c, ...financeSettings, financeRules: JSON.stringify(financeSettings.rules)} : c));
+          })
+          .withFailureHandler((err) => { alert(l("存檔失敗：", "Save failed: ") + err.message); setIsSyncing(false); triggerGlitch(); })
+          .updateFinanceSettings(payload, token);
+      };
+
+      // --- SYS.AUTO.SUM ---
+      const engine = useMemo(() => {
+        if (!selectedCase) return { a: 0, n: 0, base: 0, items: 0, net: 0, gross: 0 };
+        const totalA = (floors || []).reduce((sum, f) => sum + Number(f?.area || 0), 0);
+        const totalN = (floors || []).length;
+        const baseFee = selectedCase.association === '高雄市公會' ? calculateKaohsiungFormula(totalA, totalN) : 0;
+        const itemsTotal = (additionalItems || []).reduce((sum, item) => sum + calculateItemTotal(item?.subItems), 0);
+        const netTotal = baseFee + itemsTotal;
+        return { a: totalA, n: totalN, base: baseFee, items: itemsTotal, net: netTotal, gross: calculateGross(netTotal) };
+      }, [selectedCase, floors, additionalItems]);
+
+      // --- SYS.FINANCE.MATRIX (DYNAMIC GUILD ARRAY) ---
+      const finance = useMemo(() => {
+        const baseRevenue = financeSettings?.baseType === 'net' ? engine.net : engine.gross;
+        
+        // 將使用者手動輸入的公會各項代扣費用加總
+        const guildDeductions = financeSettings?.rules?.guildDeductions || [];
+        const totalGuildDeduction = guildDeductions.reduce((sum, d) => sum + Number(d.amount || 0), 0);
+        
+        // 實際外包
+        const actualOutsourcing = (actualItems || []).reduce((sum, item) => sum + calculateItemTotal(item?.subItems), 0);
+        
+        // 實際可分配淨利 = 總收入 - 公會總代扣 - 實際外包
+        const distributable = baseRevenue - totalGuildDeduction - actualOutsourcing;
+        
+        return {
+          revenue: baseRevenue, 
+          guildFee: totalGuildDeduction, 
+          outsourcing: actualOutsourcing, 
+          netProfit: distributable,
+          hqShare: Math.round(distributable * (Number(financeSettings?.hqPercent || 0) / 100)),
+          leadShare: Math.round(distributable * (Number(financeSettings?.leadPercent || 0) / 100)),
+          execShare: Math.round(distributable * (Number(financeSettings?.execPercent || 0) / 100)),
+          sumValid: (Number(financeSettings?.hqPercent || 0) + Number(financeSettings?.leadPercent || 0) + Number(financeSettings?.execPercent || 0)) === 100
+        };
+      }, [engine, financeSettings, actualItems]);
+
+      return (
+        <div className={glitch ? 'glitch-effect' : ''}>
+          <header className={`border-b-[12px] border-black pb-8 mb-10 flex flex-col xl:flex-row justify-between items-start xl:items-end gap-6 ${isExporting ? 'hide-on-print' : ''}`}>
+            <div>
+              <h1 className="text-7xl md:text-9xl font-black tracking-tighter leading-none">{l('澄鴻工程顧問', 'CHENG HUNG ENG.')}</h1>
+              <div className="mt-6 flex flex-wrap gap-4 items-center">
+                <span className="text-4xl md:text-6xl font-black bg-black text-white px-6 py-4 border-4 border-black">{l('總公司', 'HQ')}</span>
+                <span className="text-3xl md:text-5xl font-black text-black border-4 border-black px-6 py-4 bg-yellow-300 shadow-[8px_8px_0px_0px_#000]">{l('結構安全與鑑定部門', 'Structural Safety & Appraisal Dept.')}</span>
+              </div>
+            </div>
+            <div className="font-mono text-3xl font-black px-8 py-6 border-4 border-black bg-white shadow-[10px_10px_0px_0px_#000] flex flex-col items-center gap-4">
+              <span className="text-center">AUTHORIZED BY<br/>CHANGSHENG LIU</span>
+              <button 
+                onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} 
+                className="bg-black text-white w-full py-2 text-xl hover:bg-yellow-300 hover:text-black transition-colors border-4 border-black font-black"
+              >
+                {l('EN Translation', '切換至中文')}
+              </button>
+            </div>
+          </header>
+
+          <main className={`grid grid-cols-1 ${isExporting ? 'block' : 'xl:grid-cols-12'} gap-12`}>
+            {/* ====== 左側樞紐 ====== */}
+            <div className={`xl:col-span-3 ${isExporting ? 'hide-on-print' : ''}`}>
+              <div className="brutal-box p-8 sticky top-12 bg-gray-50 border-8 border-black">
+                <h2 className="text-4xl font-black mb-8 uppercase border-b-8 border-black pb-4 tracking-tight">{l('案件開立樞紐', 'CASE CREATION HUB')}</h2>
+                <form onSubmit={handleAddCase} className="flex flex-col gap-5 mb-10 bg-white p-6 border-4 border-black shadow-[8px_8px_0px_0px_#000]">
+                  <select value={newCase.association} onChange={e => setNewCase({...newCase, association: e.target.value})} className="brutal-input p-4 text-2xl font-black cursor-pointer bg-blue-50">
+                    {ASSOCIATIONS.map(a => <option key={a} value={a}>{l(a, EN_ASSOCIATIONS[a]||a)}</option>)}
+                  </select>
+                  <input type="text" placeholder={l("*案名 e.g. 建國路案", "*Case Name e.g. Jianguo Rd.")} value={newCase.caseName} onChange={e => setNewCase({...newCase, caseName: e.target.value})} className="brutal-input p-4 text-2xl font-black" required />
+                  <input type="text" placeholder={l("鑑定種類 (例:現況/損鄰)", "Appraisal Type (e.g. Current)")} value={newCase.appraisalType} onChange={e => setNewCase({...newCase, appraisalType: e.target.value})} className="brutal-input p-4 text-xl font-bold" />
+                  <input type="text" placeholder={l("營造廠名字", "Contractor Name")} value={newCase.contractor} onChange={e => setNewCase({...newCase, contractor: e.target.value})} className="brutal-input p-4 text-xl font-bold" />
+                  <input type="text" placeholder={l("集團名字", "Group Name")} value={newCase.group} onChange={e => setNewCase({...newCase, group: e.target.value})} className="brutal-input p-4 text-xl font-bold" />
+                  <input type="text" placeholder={l("鑑定技師", "Appraisal Engineer")} value={newCase.engineer} onChange={e => setNewCase({...newCase, engineer: e.target.value})} className="brutal-input p-4 text-xl font-bold" />
+                  <input type="text" placeholder={l("建造執照號碼", "Building Permit ID")} value={newCase.permitId} onChange={e => setNewCase({...newCase, permitId: e.target.value})} className="brutal-input p-4 text-xl font-bold" />
+                  <button type="submit" disabled={isSyncing} className={`brutal-box text-white text-3xl font-black py-5 flex items-center justify-center gap-3 mt-4 transition-colors ${isSyncing ? 'bg-gray-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-black'}`}>{isSyncing ? l('處理中...','...') : <><IconPlus /> {l('開立案件', 'CREATE CASE')}</>}</button>
+                </form>
+                
+                <div className="grid gap-5 max-h-[700px] overflow-y-auto pr-4">
+                  {(registry || []).map(rec => (
+                    <div key={rec.id} onClick={() => loadCaseDetails(rec)} className={`brutal-box p-6 cursor-pointer border-4 transition-all ${selectedCase?.id === rec.id ? 'bg-yellow-200 border-black shadow-none translate-x-1 translate-y-1' : 'bg-white hover:bg-gray-100 border-black'}`}>
+                      {editingCaseId === rec.id ? (
+                        <div className="flex flex-col gap-4" onClick={e => e.stopPropagation()}>
+                           <input type="text" value={editCaseData.caseName} onChange={e => setEditCaseData({...editCaseData, caseName: e.target.value})} className="border-4 border-black p-3 font-black text-3xl" />
+                           <input type="text" placeholder={l("鑑定種類", "Type")} value={editCaseData.appraisalType} onChange={e => setEditCaseData({...editCaseData, appraisalType: e.target.value})} className="border-2 border-black p-3 text-xl font-bold" />
+                           <input type="text" placeholder={l("營造廠", "Contractor")} value={editCaseData.contractor} onChange={e => setEditCaseData({...editCaseData, contractor: e.target.value})} className="border-2 border-black p-3 text-xl font-bold" />
+                           <div className="flex gap-4 mt-3">
+                             <button type="button" onClick={handleEditCase} disabled={isSyncing} className="bg-green-500 text-white p-3 flex-1 border-4 border-black flex justify-center">{isSyncing ? '...' : <IconSave />}</button>
+                             <button type="button" onClick={() => setEditingCaseId(null)} className="bg-gray-500 text-white p-3 flex-1 border-4 border-black text-2xl font-black">X</button>
+                           </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex justify-between items-start mb-4">
+                            <div className="flex gap-2 flex-wrap">
+                              <span className="font-black text-lg border-2 border-black px-3 py-1 bg-white">{l(rec.association, EN_ASSOCIATIONS[rec.association]||rec.association)}</span>
+                              {rec.appraisalType && <span className="font-black text-lg border-2 border-black px-3 py-1 bg-purple-200">{rec.appraisalType}</span>}
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                              <button type="button" onClick={async (e) => { e.stopPropagation(); const t = await checkAuth(e); if(t){setEditingCaseId(rec.id); setEditCaseData(rec);} }} className="bg-blue-500 text-white p-2 border-4 border-black hover:bg-black"><IconEdit /></button>
+                              <button type="button" onClick={(e) => handleDeleteCase(rec.id, e)} className="bg-red-500 text-white p-2 border-4 border-black hover:bg-black"><IconTrash /></button>
+                            </div>
+                          </div>
+                          <div className="text-4xl font-black tracking-tight">{getCaseFullName(rec)}</div>
+                          <div className="text-xl text-gray-700 mt-3 font-bold">{rec.contractor && `${l('營造', 'Contractor')}: ${rec.contractor}`} {rec.engineer && `| ${l('技師', 'Eng')}: ${rec.engineer}`}</div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ====== 右側：雙軌儀表板區 ====== */}
+            <div className={`xl:col-span-9 ${isExporting ? 'pdf-mode' : ''}`} ref={printRef}>
+              {!selectedCase ? (
+                <div className="text-7xl font-black border-8 border-dashed border-black p-32 text-center bg-gray-50 uppercase text-gray-300 min-h-[800px] flex items-center justify-center">{l('請選擇案件', 'SELECT A CASE')}</div>
+              ) : (
+                <div className="flex flex-col gap-10 relative">
+                  {isSyncing && <div className="absolute -top-12 right-0 bg-yellow-300 px-6 py-3 text-2xl font-black border-4 border-black animate-pulse z-50 shadow-[6px_6px_0px_0px_#000]">{l('SYNCING DATA...', 'SYNCING DATA...')}</div>}
+                  
+                  {isExporting && (
+                    <div className="border-b-8 border-black pb-8 mb-8 text-center">
+                       <h1 className="text-6xl font-black">{l('澄鴻工程顧問公司 - 報價明細單', 'CHENG HUNG ENG. - QUOTATION')}</h1>
+                       <div className="text-3xl font-bold mt-4">{l('結構安全與鑑定部門', 'Structural Safety & Appraisal Dept.')}</div>
+                    </div>
+                  )}
+
+                  {/* 案名與全局按鈕 */}
+                  <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end mb-4 gap-8">
+                    <div>
+                      <h2 className="text-6xl md:text-8xl font-black uppercase break-all tracking-tighter leading-none">{getCaseFullName(selectedCase)}</h2>
+                      <div className="flex flex-wrap gap-5 mt-6 text-2xl font-black text-gray-800">
+                         {selectedCase.appraisalType && <span className="border-4 border-black px-4 py-2 bg-purple-200">{l('種類', 'Type')}: {selectedCase.appraisalType}</span>}
+                         {selectedCase.contractor && <span className="border-4 border-black px-4 py-2 bg-gray-100">{l('營造', 'Contractor')}: {selectedCase.contractor}</span>}
+                         {selectedCase.group && <span className="border-4 border-black px-4 py-2 bg-gray-100">{l('集團', 'Group')}: {selectedCase.group}</span>}
+                         {selectedCase.engineer && <span className="border-4 border-black px-4 py-2 bg-blue-100">{l('技師', 'Eng')}: {selectedCase.engineer}</span>}
+                         {selectedCase.permitId && <span className="border-4 border-black px-4 py-2 bg-blue-100">{l('建照', 'Permit')}: {selectedCase.permitId}</span>}
+                      </div>
+                    </div>
+                    {currentView === 'quotation' && (
+                      <button type="button" disabled={isExporting} onClick={handleExportPDF} className={`hide-on-print brutal-box text-white text-3xl font-black px-10 py-6 flex items-center gap-4 whitespace-nowrap transition-colors ${isExporting ? 'bg-gray-500' : 'bg-red-600 hover:bg-black'}`}>
+                        <IconDownload /> {isExporting ? l('匯出中...', 'EXPORTING...') : l('匯出 PDF', 'EXPORT PDF')}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 雙軌切換開關 */}
+                  <div className="hide-on-print flex w-full border-4 border-black mt-4 mb-6 bg-gray-100 shadow-[12px_12px_0px_0px_#000]">
+                    <button type="button" onClick={() => setCurrentView('quotation')} className={`flex-1 py-8 text-3xl md:text-5xl font-black uppercase transition-colors ${currentView === 'quotation' ? 'bg-yellow-300 text-black border-b-8 border-black' : 'text-gray-400 hover:bg-gray-200 border-b-8 border-transparent'}`}>
+                      {l('報價明細樞紐', 'QUOTATION HUB')}
+                    </button>
+                    <button type="button" onClick={() => setCurrentView('completion')} className={`flex-1 py-8 text-3xl md:text-5xl font-black uppercase transition-colors border-l-4 border-black ${currentView === 'completion' ? 'bg-green-300 text-black border-b-8 border-black' : 'text-gray-400 hover:bg-gray-200 border-b-8 border-transparent'}`}>
+                      {l('完工利潤結算', 'PROFIT SETTLEMENT')}
+                    </button>
+                  </div>
+
+                  {!isUnlocked ? (
+                    <div className="brutal-box bg-black text-white p-16 flex flex-col items-center justify-center text-center shadow-[20px_20px_0px_0px_#fef08a] min-h-[600px] border-8 border-black">
+                      <IconLock />
+                      <div className="text-4xl text-gray-400 mb-12 font-bold bg-gray-900 px-8 py-4 border-4 border-gray-700">{l('受保護的數據樞紐', 'PROTECTED DATA HUB')}</div>
+                      <div className="w-full max-w-5xl bg-white/10 p-12 border-8 border-yellow-300 mb-16">
+                        <div className="text-5xl text-gray-400 font-black mb-4">{l('未稅總計 (Net)', 'Net Total')}</div>
+                        <div className="text-7xl font-black text-white mb-12 border-b-4 border-white/20 pb-12">${formatMoney(engine.net)}</div>
+                        <div className="text-5xl text-yellow-500 font-black mb-8">{l('最終含稅報價 (Gross 5%)', 'Gross Total (5% Tax)')}</div>
+                        <div className="text-9xl md:text-[180px] leading-none font-black text-yellow-300 tracking-tighter drop-shadow-2xl">${formatMoney(engine.gross)}</div>
+                      </div>
+                      <button type="button" onClick={checkAuth} className="bg-yellow-300 text-black text-5xl font-black py-10 px-20 border-8 border-black shadow-[12px_12px_0px_0px_#fff] hover:bg-white flex items-center gap-8 transition-transform hover:translate-y-2 hover:translate-x-2 hover:shadow-none">
+                        <IconUnlock /> {l('點擊解鎖系統權限', 'CLICK TO UNLOCK SYSTEM ACCESS')}
+                      </button>
+                    </div>
+                  ) : (
+                    currentView === 'quotation' ? (
+                      /* =================== 報價明細樞紐 (Quotation View) =================== */
+                      <>
+                        <div className="brutal-box bg-black text-white p-10 md:p-16 shadow-[16px_16px_0px_0px_#fef08a] border-8 border-black">
+                          <div className="flex flex-col md:flex-row justify-between md:items-end border-b-8 border-yellow-300 pb-8 mb-10">
+                            <h3 className="text-5xl md:text-6xl font-black text-yellow-300 tracking-tight">{l('鑑定案報價明細 (未稅)', 'Appraisal Quotation Details (Net)')}</h3>
+                            <span className="text-2xl font-black mt-6 md:mt-0 text-white bg-red-600 px-6 py-3 border-4 border-white">{l('來源：財團法人聯合營建發展基金會', 'Source: Joint Construction Development Fund')}</span>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-10">
+                            <div className="border-4 border-dashed border-white/30 p-8 relative">
+                              <div className="absolute -top-6 left-8 bg-black px-4 text-yellow-300 font-black text-2xl">{l('鑑定基準價', 'Base Fee')}</div>
+                              <div className="text-3xl text-gray-400 mb-4 font-bold">{l('公會', 'Guild')}: {l(selectedCase.association, EN_ASSOCIATIONS[selectedCase.association]||selectedCase.association)}</div>
+                              {selectedCase.association === '高雄市公會' ? (
+                                <>
+                                  <div className="font-mono text-xl text-green-400 mb-6 bg-gray-900 p-4 border-2 border-green-900">Max(4萬, (A/500)*3萬) + (n-1)*0.5萬 <br/>A={formatMoney(engine.a)}, n={engine.n}</div>
+                                  <div className="text-6xl font-black">${formatMoney(engine.base)}</div>
+                                </>
+                              ) : (<div className="text-3xl font-bold text-gray-500">{l('此公會無預設公式', 'No default formula for this assoc.')}</div>)}
+                            </div>
+                            <div className="border-4 border-dashed border-white/30 p-8 relative">
+                              <div className="absolute -top-6 left-8 bg-black px-4 text-yellow-300 font-black text-2xl">{l('附加工項總和', 'Additional Items Total')}</div>
+                              <div className="text-3xl text-gray-400 mb-4 font-bold">{l(`包含 ${additionalItems.length} 項主作業`, `Includes ${additionalItems.length} main tasks`)}</div>
+                              <div className="text-6xl font-black">${formatMoney(engine.items)}</div>
+                            </div>
+                          </div>
+                          <div className="bg-white/10 p-10 border-t-8 border-yellow-300 flex flex-col lg:flex-row justify-between items-center gap-8">
+                            <div className="w-full lg:w-auto text-center lg:text-left">
+                              <div className="text-3xl text-gray-400 font-black mb-4">{l('未稅總計 (Net)', 'Net Total')}</div>
+                              <div className="text-6xl font-black text-white">${formatMoney(engine.net)}</div>
+                            </div>
+                            <div className="w-full lg:w-auto text-center lg:text-right">
+                              <div className="text-3xl text-yellow-500 font-black mb-4">{l('最終含稅報價 (Gross 5%)', 'Gross Total (5% Tax)')}</div>
+                              <div className="text-8xl md:text-9xl font-black text-yellow-300 tracking-tighter drop-shadow-xl">${formatMoney(engine.gross)}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
+                          <div className="brutal-box p-8 md:p-10 bg-blue-50 border-8 border-black shadow-[12px_12px_0px_0px_#000]">
+                            <h3 className="text-4xl font-black mb-8 border-b-8 border-black pb-4">{l('樓層面積', 'Floor Area Matrix')}</h3>
+                            <form onSubmit={handleAddFloor} className="hide-on-print flex gap-4 mb-8">
+                              <input type="text" placeholder={l("樓層", "Floor")} value={newFloor.floorName} onChange={e=>setNewFloor({...newFloor, floorName: e.target.value})} className="brutal-input p-4 w-1/3 text-2xl font-black border-4 border-black" required />
+                              <input type="number" step="0.01" placeholder={l("面積 m²", "Area m²")} value={newFloor.area} onChange={e=>setNewFloor({...newFloor, area: e.target.value})} className="brutal-input p-4 flex-1 text-2xl font-black border-4 border-black" required />
+                              <button type="submit" disabled={isSyncing} className="bg-black text-white p-4 w-20 flex justify-center hover:bg-blue-600 transition-colors disabled:bg-gray-500"><IconPlus /></button>
+                            </form>
+                            <div className="grid gap-4">
+                              {(floors || []).map(f => (
+                                <div key={f.id} className="bg-white p-5 border-4 border-black flex justify-between items-center">
+                                  {editingFloorId === f.id ? (
+                                    <div className="flex w-full gap-3">
+                                        <input type="text" value={editFloorData.floorName} onChange={e=>setEditFloorData({...editFloorData, floorName: e.target.value})} className="border-4 border-black p-3 w-1/3 text-2xl font-black" />
+                                        <input type="number" value={editFloorData.area} onChange={e=>setEditFloorData({...editFloorData, area: e.target.value})} className="border-4 border-black p-3 flex-1 text-2xl font-black" />
+                                        <button type="button" onClick={handleEditFloor} className="bg-green-500 text-white px-6 font-black border-4 border-black hover:bg-green-600"><IconSave /></button>
+                                        <button type="button" onClick={()=>setEditingFloorId(null)} className="bg-gray-500 text-white px-6 font-black border-4 border-black hover:bg-gray-600">X</button>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <span className="text-4xl font-black">{f.floorName}</span><span className="text-3xl font-black">{formatMoney(f.area)} m²</span>
+                                      <div className="hide-on-print flex gap-4">
+                                        <button type="button" onClick={async (e) => { const t=await checkAuth(e); if(t){setEditingFloorId(f.id); setEditFloorData(f);} }} className="text-blue-600 hover:text-black"><IconEdit /></button>
+                                        <button type="button" onClick={(e) => handleDeleteFloor(f.id, e)} className="text-red-600 hover:text-black"><IconTrash /></button>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="brutal-box p-8 md:p-10 border-8 border-black shadow-[12px_12px_0px_0px_#000]">
+                            <h3 className="text-4xl font-black mb-8 border-b-8 border-black pb-4">{l('附加工項明細 (預估)', 'Additional Items (Estimated)')}</h3>
+                            <form onSubmit={handleAddItem} className="hide-on-print flex flex-col gap-5 mb-10 border-b-8 border-gray-300 pb-10">
+                              <input type="text" placeholder={l("主工項名稱 e.g. 鑽心取樣", "Main Item e.g. Core Drilling")} value={newItem.itemName} onChange={e=>setNewItem({...newItem, itemName: e.target.value})} className="brutal-input p-5 font-black text-4xl border-4 border-black" required />
+                              <div className="bg-gray-100 p-6 border-4 border-black">
+                                <label className="block text-2xl font-black mb-4">{l('子細項 (價格與數量)', 'Sub-items (Price & Qty)')}</label>
+                                {(newItem.subItems || []).map((sub, idx) => (
+                                  <div key={sub._id || idx} className="flex gap-4 mb-4">
+                                    <input type="text" placeholder={l("如: 柱", "e.g. Column")} value={sub.name} onChange={e=>handleNewSubItemChange(idx, 'name', e.target.value)} className="brutal-input p-4 flex-1 text-2xl font-black border-4 border-black" required />
+                                    <input type="number" placeholder={l("單價", "Price")} value={sub.price} onChange={e=>handleNewSubItemChange(idx, 'price', e.target.value)} className="brutal-input p-4 w-1/4 text-2xl font-black border-4 border-black" required />
+                                    <input type="number" placeholder={l("數量", "Qty")} value={sub.quantity} onChange={e=>handleNewSubItemChange(idx, 'quantity', e.target.value)} className="brutal-input p-4 w-1/4 text-2xl font-bold border-4 border-black" min="1" required />
+                                    {newItem.subItems.length > 1 && (<button type="button" onClick={() => removeNewSubItemRow(sub._id)} className="bg-red-500 text-white px-5 font-black text-2xl hover:bg-black border-4 border-black">X</button>)}
+                                  </div>
+                                ))}
+                                <button type="button" onClick={addNewSubItemRow} className="text-xl font-black bg-white border-4 border-black px-6 py-3 hover:bg-yellow-300 transition-colors">{l('+ 新增細項', '+ Add Sub-item')}</button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-5">
+                                <input type="text" placeholder={l("聯絡人", "Contact")} value={newItem.contact} onChange={e=>setNewItem({...newItem, contact: e.target.value})} className="brutal-input p-4 text-2xl border-4 border-black font-bold" />
+                                <input type="text" placeholder={l("電話", "Phone")} value={newItem.phone} onChange={e=>setNewItem({...newItem, phone: e.target.value})} className="brutal-input p-4 text-2xl border-4 border-black font-bold" />
+                              </div>
+                              <textarea placeholder={l("備註", "Note")} value={newItem.note} onChange={e=>setNewItem({...newItem, note: e.target.value})} className="brutal-input p-4 text-2xl border-4 border-black font-bold" rows="2"></textarea>
+                              <button type="submit" disabled={isSyncing} className={`text-white p-6 font-black text-3xl transition-colors flex items-center justify-center gap-4 mt-3 shadow-[8px_8px_0px_0px_#2563eb] ${isSyncing ? 'bg-gray-500 cursor-not-allowed' : 'bg-black hover:bg-blue-600'}`}>{isSyncing ? l('處理中...','...') : <><IconPlus /> {l('加入預估工項', 'Add Estimated Item')}</>}</button>
+                            </form>
+                            
+                            <div className="grid gap-8">
+                              {(additionalItems || []).map(item => (
+                                <div key={item.id} className="bg-white p-8 border-8 border-black shadow-[8px_8px_0px_0px_#000]">
+                                  {editingItemId === item.id ? (
+                                    <div className="flex flex-col gap-5">
+                                      <input type="text" value={editItemData.itemName} onChange={e=>setEditItemData({...editItemData, itemName: e.target.value})} className="border-4 border-black p-4 font-black text-4xl" />
+                                      <div className="bg-yellow-50 p-6 border-4 border-black">
+                                        {(editItemData.subItems || []).map((sub, idx) => (
+                                          <div key={sub._id || idx} className="flex gap-3 mb-3">
+                                            <input type="text" value={sub.name} onChange={e=>handleEditSubItemChange(idx, 'name', e.target.value)} className="border-4 border-black p-3 flex-1 text-2xl font-black" placeholder={l("細項名", "Sub-item Name")} />
+                                            <input type="number" value={sub.price} onChange={e=>handleEditSubItemChange(idx, 'price', e.target.value)} className="border-4 border-black p-3 w-1/4 text-2xl font-black" placeholder={l("單價", "Price")} />
+                                            <input type="number" value={sub.quantity} onChange={e=>handleEditSubItemChange(idx, 'quantity', e.target.value)} className="border-4 border-black p-3 w-1/5 text-2xl font-black" placeholder={l("數量", "Qty")} />
+                                            {editItemData.subItems.length > 1 && (<button type="button" onClick={() => removeEditSubItemRow(sub._id)} className="bg-red-500 text-white px-4 font-black text-2xl border-4 border-black hover:bg-black">X</button>)}
+                                          </div>
+                                        ))}
+                                        <button type="button" onClick={addEditSubItemRow} className="text-lg font-black bg-white border-4 border-black px-5 py-3 mt-3 hover:bg-yellow-300 transition-colors">{l('+ 加細項', '+ Add Sub')}</button>
+                                      </div>
+                                      <div className="flex gap-4">
+                                        <input type="text" value={editItemData.contact} onChange={e=>setEditItemData({...editItemData, contact: e.target.value})} className="border-4 border-black p-3 flex-1 text-2xl font-bold" placeholder={l("聯絡人", "Contact")} />
+                                        <input type="text" value={editItemData.phone} onChange={e=>setEditItemData({...editItemData, phone: e.target.value})} className="border-4 border-black p-3 flex-1 text-2xl font-bold" placeholder={l("電話", "Phone")} />
+                                      </div>
+                                      <textarea value={editItemData.note} onChange={e=>setEditItemData({...editItemData, note: e.target.value})} className="border-4 border-black p-3 text-2xl font-bold" placeholder={l("備註", "Note")}></textarea>
+                                      <div className="flex gap-4 mt-4">
+                                        <button type="button" onClick={handleEditItem} className="bg-green-500 text-white font-black text-2xl py-4 flex-1 border-4 border-black hover:bg-green-600 transition-colors">{l('儲存變更', 'Save Changes')}</button>
+                                        <button type="button" onClick={() => setEditingItemId(null)} className="bg-gray-500 text-white font-black text-2xl py-4 flex-1 border-4 border-black hover:bg-gray-600 transition-colors">{l('取消', 'Cancel')}</button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div className="flex justify-between items-start mb-6 border-b-4 border-gray-200 pb-5">
+                                        <div className="text-4xl md:text-5xl font-black text-blue-900">{item.itemName}</div>
+                                        <div className="text-right">
+                                          <div className="text-4xl md:text-5xl font-black text-black">{l('小計', 'Subtotal')}: ${formatMoney(calculateItemTotal(item.subItems))}</div>
+                                        </div>
+                                      </div>
+                                      <div className="pl-6 border-l-8 border-blue-200 mb-6 space-y-3">
+                                        {(item.subItems || []).map((sub, idx) => (
+                                          <div key={idx} className="flex flex-wrap justify-between items-center text-2xl text-gray-800 gap-3">
+                                            <span className="font-black">- {sub.name || l('一式', 'Lump Sum')}</span>
+                                            <span className="font-mono bg-gray-100 px-4 py-2 border-4 border-gray-300 font-bold">
+                                              @ ${formatMoney(sub.price)} × {sub.quantity || 1} = <span className="font-black text-black text-3xl">${formatMoney(Number(sub.price)*Number(sub.quantity||1))}</span>
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                      {(item.contact || item.phone) && (
+                                        <div className="hide-on-print mt-4">
+                                          <span className="text-2xl font-bold text-gray-800 bg-yellow-100 inline-block px-4 py-3 border-4 border-yellow-400">
+                                            {l('負責', 'PIC')}: {item.contact || l('未填', 'N/A')} {item.phone && `| 📞 ${item.phone}`}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {item.note && (
+                                        <div className="text-2xl text-gray-700 mt-4 p-5 bg-gray-50 border-4 border-dashed border-gray-400 whitespace-pre-line font-bold">
+                                          <span className="font-black text-black">{l('備註：', 'Note: ')}</span>{item.note}
+                                        </div>
+                                      )}
+                                      <div className="hide-on-print mt-8 flex justify-end gap-4 border-t-8 border-gray-100 pt-6">
+                                         <button type="button" onClick={async (e) => { const t=await checkAuth(e); if(t){setEditingItemId(item.id); setEditItemData(item);} }} className="bg-blue-100 text-blue-900 border-4 border-blue-400 px-8 py-3 text-2xl font-black hover:bg-blue-300 transition-colors">{l('編輯', 'Edit')}</button>
+                                         <button type="button" onClick={(e) => handleDeleteItem(item.id, e)} className="bg-red-100 text-red-900 border-4 border-red-400 px-8 py-3 text-2xl font-black hover:bg-red-300 transition-colors">{l('移除', 'Remove')}</button>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      /* =================== 完工資料樞紐 (Profit Distribution View) =================== */
+                      <div className="flex flex-col gap-10">
+                        
+                        {/* ================= 上半部：成本結算區塊 (Deductions & Costs) ================= */}
+                        <div className="brutal-box p-10 md:p-16 bg-gray-50 shadow-[16px_16px_0px_0px_#000] border-8 border-black">
+                          <div className="flex items-center border-b-8 border-black pb-8 mb-10">
+                            <IconCalculator />
+                            <div>
+                              <h2 className="text-5xl md:text-6xl font-black text-black tracking-tight">{l('結算母數與成本扣除', 'Base Revenue & Costs')}</h2>
+                              <span className="text-3xl font-black bg-black text-white px-6 py-3 inline-block mt-3">Deductions & Costs</span>
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mb-12 border-b-8 border-gray-300 pb-12">
+                            <div className="bg-white border-8 border-black p-8">
+                              <label className="block text-3xl font-black mb-6">{l('1. 案件總所得 (結算母數)', '1. Base Revenue')}</label>
+                              <select 
+                                className="brutal-input w-full p-5 text-3xl font-black cursor-pointer bg-blue-50 border-4 border-black"
+                                value={financeSettings.baseType}
+                                onChange={e => setFinanceSettings({...financeSettings, baseType: e.target.value})}
+                              >
+                                <option value="net">{l('代入：未稅總計', 'Use: Net Total')} (${formatMoney(engine.net)})</option>
+                                <option value="gross">{l('代入：含稅總計', 'Use: Gross Total')} (${formatMoney(engine.gross)})</option>
+                              </select>
+                            </div>
+
+                            {/* --- 升級版：全動態公會代扣清單 --- */}
+                            <div className="bg-white border-8 border-black p-8 shadow-[8px_8px_0px_0px_#000]">
+                              <div className="flex justify-between items-center mb-6">
+                                <label className="text-4xl font-black">{l('2. 公會掛件與代扣矩陣', '2. Guild Deduction Matrix')}</label>
+                              </div>
+                              
+                              {/* 動態代扣表單 */}
+                              <div className="bg-gray-100 p-6 border-4 border-black mb-8">
+                                <label className="block text-2xl font-black mb-5 text-gray-800">{l('自訂代扣細項 (依據公會請款單輸入金額)', 'Custom Deductions (per Guild Invoice)')}</label>
+                                {(financeSettings.rules.guildDeductions || []).map((deduction, idx) => (
+                                  <div key={deduction.id || idx} className="flex gap-3 mb-4 flex-col md:flex-row">
+                                    <input 
+                                      type="text" 
+                                      placeholder={l("項目 e.g. 行政費", "Item Name")} 
+                                      value={deduction.name} 
+                                      onChange={e=>handleGuildDeductionChange(idx, 'name', e.target.value)} 
+                                      className="brutal-input p-4 flex-1 text-2xl font-black border-4 border-black" 
+                                    />
+                                    <div className="flex w-full md:w-1/3 min-w-[200px]">
+                                      <span className="bg-black text-white px-4 py-4 text-2xl font-black border-4 border-r-0 border-black">$</span>
+                                      <input 
+                                        type="number" 
+                                        placeholder={l("金額", "Amount")} 
+                                        value={deduction.amount} 
+                                        onChange={e=>handleGuildDeductionChange(idx, 'amount', e.target.value)} 
+                                        className="brutal-input p-4 w-full text-2xl font-black border-4 border-black" 
+                                      />
+                                    </div>
+                                    <button type="button" onClick={() => removeGuildDeduction(idx)} className="bg-red-500 text-white px-5 font-black text-2xl hover:bg-black border-4 border-black">X</button>
+                                  </div>
+                                ))}
+                                <button type="button" onClick={addGuildDeduction} className="text-2xl font-black bg-white border-4 border-black px-6 py-4 hover:bg-yellow-300 transition-colors w-full md:w-auto">{l('+ 新增代扣項目', '+ Add Deduction Item')}</button>
+                              </div>
+
+                              <div className="border-l-8 border-yellow-400 pl-6 space-y-3 mb-8 font-mono text-xl font-bold text-gray-700">
+                                <div className="flex justify-between items-end border-b-2 border-gray-200 pb-2">
+                                  <span className="text-2xl">{l('總鑑定費 (結算母數)', 'Base Revenue')}:</span> 
+                                  <span className="text-black text-3xl font-black">${formatMoney(finance.revenue)}</span>
+                                </div>
+                                {(financeSettings.rules.guildDeductions || []).map((d, i) => (
+                                  (d.name && d.amount) ? (
+                                    <div key={i} className="flex justify-between items-end text-red-600">
+                                      <span className="text-2xl">- {d.name}:</span> 
+                                      <span className="text-3xl font-black">${formatMoney(d.amount)}</span>
+                                    </div>
+                                  ) : null
+                                ))}
+                              </div>
+
+                              <div className="flex flex-col gap-3">
+                                <div className="text-3xl font-black text-red-600 bg-red-100 p-5 border-4 border-red-600 flex justify-between items-center shadow-[6px_6px_0px_0px_#dc2626]">
+                                  <span>{l('總代扣成本:', 'Total Deducted:')}</span>
+                                  <span className="text-4xl">- ${formatMoney(finance.guildFee)}</span>
+                                </div>
+                                <div className="text-3xl font-black text-green-700 bg-green-100 p-5 border-4 border-green-700 flex justify-between items-center shadow-[6px_6px_0px_0px_#15803d] mt-2">
+                                  <span>{l('公會實際匯入金額:', 'Actual Deposited:')}</span>
+                                  <span className="text-5xl">${formatMoney(finance.revenue - finance.guildFee)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 3. 完工實際外包費用 CRUD */}
+                          <div className="bg-white border-8 border-red-900 p-8 md:p-12 shadow-[12px_12px_0px_0px_#7f1d1d] transition-all">
+                            <div 
+                              className={`flex flex-col md:flex-row justify-between md:items-end cursor-pointer hover:bg-red-50 transition-colors p-4 -m-4 rounded-lg ${isActualExpanded ? 'border-b-8 border-red-900 pb-6 mb-10' : ''}`}
+                              onClick={() => setIsActualExpanded(!isActualExpanded)}
+                            >
+                              <div className="flex items-center gap-6">
+                                <h3 className="text-4xl md:text-5xl font-black text-red-900">{l('3. 完工實際外包花費', '3. Actual Outsourcing Costs')}</h3>
+                                <span className="text-2xl font-black bg-red-900 text-white px-4 py-2 border-4 border-black shadow-[4px_4px_0px_0px_#000]">
+                                  {isActualExpanded ? l('▲ 收起明細', '▲ Collapse') : l('▼ 展開明細', '▼ Expand')}
+                                </span>
+                              </div>
+                              <div className="text-3xl font-black bg-red-50 border-4 border-red-900 px-6 py-4 text-red-800 shadow-[6px_6px_0px_0px_#7f1d1d] mt-6 md:mt-0">
+                                {l('實際扣除總額:', 'Actual Total:')} <span className="text-5xl">${formatMoney(finance.outsourcing)}</span>
+                              </div>
+                            </div>
+                            
+                            {isActualExpanded && (
+                              <div className="animate-fade-in mt-8">
+                                <form onSubmit={handleAddActualItem} className="flex flex-col gap-5 mb-10 border-b-8 border-gray-200 pb-10">
+                                  <input type="text" placeholder={l("實際花費主工項 e.g. 鑽心取樣", "Actual Main Item e.g. Core Drilling")} value={newActualItem.itemName} onChange={e=>setNewActualItem({...newActualItem, itemName: e.target.value})} className="brutal-input p-5 font-black text-4xl border-4 border-red-900" required />
+                                  <div className="bg-gray-50 p-6 border-4 border-black">
+                                    <label className="block text-2xl font-black mb-5 text-red-900">{l('實際發生細項 (價格與數量)', 'Actual Sub-items (Price & Qty)')}</label>
+                                    {newActualItem.subItems.map((sub, idx) => (
+                                      <div key={sub._id || idx} className="flex gap-4 mb-4">
+                                        <input type="text" placeholder={l("如: 柱", "e.g. Column")} value={sub.name} onChange={e=>handleNewActualSubItemChange(idx, 'name', e.target.value)} className="brutal-input p-4 flex-1 text-2xl font-black border-4 border-red-900" required />
+                                        <input type="number" placeholder={l("單價", "Price")} value={sub.price} onChange={e=>handleNewActualSubItemChange(idx, 'price', e.target.value)} className="brutal-input p-4 w-1/4 text-2xl font-black border-4 border-red-900" required />
+                                        <input type="number" placeholder={l("數量", "Qty")} value={sub.quantity} onChange={e=>handleNewActualSubItemChange(idx, 'quantity', e.target.value)} className="brutal-input p-4 w-1/4 text-2xl font-black border-4 border-red-900" min="1" required />
+                                        {newActualItem.subItems.length > 1 && (<button type="button" onClick={() => removeNewActualSubItemRow(sub._id)} className="bg-red-500 text-white px-5 font-black text-2xl hover:bg-black border-4 border-black">X</button>)}
+                                      </div>
+                                    ))}
+                                    <button type="button" onClick={addNewActualSubItemRow} className="text-xl font-black bg-red-100 border-4 border-red-900 text-red-900 px-6 py-3 hover:bg-red-200 transition-colors">{l('+ 新增實際細項', '+ Add Actual Sub-item')}</button>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-5">
+                                    <input type="text" placeholder={l("實際聯絡人", "Actual Contact")} value={newActualItem.contact} onChange={e=>setNewActualItem({...newActualItem, contact: e.target.value})} className="brutal-input p-4 text-2xl font-bold border-4 border-red-900" />
+                                    <input type="text" placeholder={l("實際電話", "Actual Phone")} value={newActualItem.phone} onChange={e=>setNewActualItem({...newActualItem, phone: e.target.value})} className="brutal-input p-4 text-2xl font-bold border-4 border-red-900" />
+                                  </div>
+                                  <textarea placeholder={l("實際備註", "Actual Note")} value={newActualItem.note} onChange={e=>setNewActualItem({...newActualItem, note: e.target.value})} className="brutal-input p-4 text-2xl font-bold border-4 border-red-900" rows="2"></textarea>
+                                  <button type="submit" disabled={isSyncing} className={`text-white p-6 font-black text-3xl transition-colors flex items-center justify-center gap-4 mt-3 shadow-[8px_8px_0px_0px_#450a0a] ${isSyncing ? 'bg-gray-500 cursor-not-allowed' : 'bg-red-900 hover:bg-black'}`}>{isSyncing ? l('處理中...', '...') : <><IconPlus /> {l('登錄實際外包成本', 'Log Actual Cost')}</>}</button>
+                                </form>
+                                
+                                <div className="grid gap-8">
+                                  {(actualItems || []).map(item => (
+                                    <div key={item.id} className="bg-white p-8 border-8 border-red-900 shadow-[8px_8px_0px_0px_#7f1d1d]">
+                                      {editingActualId === item.id ? (
+                                        <div className="flex flex-col gap-5">
+                                          <input type="text" value={editActualData.itemName} onChange={e=>setEditActualData({...editActualData, itemName: e.target.value})} className="border-4 border-red-900 p-4 font-black text-3xl" />
+                                          <div className="bg-red-50 p-6 border-4 border-red-900">
+                                            {(editActualData.subItems || []).map((sub, idx) => (
+                                              <div key={sub._id || idx} className="flex gap-3 mb-3">
+                                                <input type="text" value={sub.name} onChange={e=>handleEditActualSubItemChange(idx, 'name', e.target.value)} className="border-4 border-red-900 p-3 flex-1 text-xl font-black" placeholder={l("細項名", "Sub-item Name")} />
+                                                <input type="number" value={sub.price} onChange={e=>handleEditActualSubItemChange(idx, 'price', e.target.value)} className="border-4 border-red-900 p-3 w-1/4 text-xl font-black" placeholder={l("單價", "Price")} />
+                                                <input type="number" value={sub.quantity} onChange={e=>handleEditActualSubItemChange(idx, 'quantity', e.target.value)} className="border-4 border-red-900 p-3 w-1/5 text-xl font-black" placeholder={l("數量", "Qty")} />
+                                                {editActualData.subItems.length > 1 && (<button type="button" onClick={() => removeEditActualSubItemRow(sub._id)} className="bg-red-500 text-white px-4 font-black text-2xl border-4 border-black hover:bg-black">X</button>)}
+                                              </div>
+                                            ))}
+                                            <button type="button" onClick={addEditActualSubItemRow} className="text-lg font-black bg-white border-4 border-red-900 text-red-900 px-5 py-3 mt-3 hover:bg-red-100 transition-colors">{l('+ 加細項', '+ Add Sub')}</button>
+                                          </div>
+                                          <div className="flex gap-4">
+                                            <input type="text" value={editActualData.contact} onChange={e=>setEditActualData({...editActualData, contact: e.target.value})} className="border-4 border-red-900 p-3 flex-1 text-2xl font-bold" placeholder={l("實際聯絡人", "Actual Contact")} />
+                                            <input type="text" value={editActualData.phone} onChange={e=>setEditActualData({...editActualData, phone: e.target.value})} className="border-4 border-red-900 p-3 flex-1 text-2xl font-bold" placeholder={l("實際電話", "Actual Phone")} />
+                                          </div>
+                                          <textarea value={editActualData.note} onChange={e=>setEditActualData({...editActualData, note: e.target.value})} className="border-4 border-red-900 p-3 text-2xl font-bold" placeholder={l("實際備註", "Actual Note")}></textarea>
+                                          <div className="flex gap-4 mt-4">
+                                            <button type="button" onClick={handleEditActualItem} className="bg-green-600 text-white font-black text-2xl py-4 flex-1 border-4 border-green-900 hover:bg-green-700 transition-colors">{l('儲存變更', 'Save Changes')}</button>
+                                            <button type="button" onClick={() => setEditingActualId(null)} className="bg-gray-500 text-white font-black text-2xl py-4 flex-1 border-4 border-gray-900 hover:bg-gray-600 transition-colors">{l('取消', 'Cancel')}</button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <div className="flex justify-between items-start mb-5 border-b-4 border-red-200 pb-5">
+                                            <div className="text-4xl md:text-5xl font-black text-red-900">{item.itemName}</div>
+                                            <div className="text-right">
+                                              <div className="text-4xl md:text-5xl font-black text-red-600">- ${formatMoney(calculateItemTotal(item.subItems))}</div>
+                                            </div>
+                                          </div>
+                                          <div className="pl-6 border-l-8 border-gray-300 mb-6 space-y-3">
+                                            {(item.subItems || []).map((sub, idx) => (
+                                              <div key={idx} className="flex flex-wrap justify-between items-center text-2xl text-gray-800 gap-3">
+                                                <span className="font-black">- {sub.name || l('一式', 'Lump Sum')}</span>
+                                                <span className="font-mono bg-red-50 px-4 py-2 border-4 border-red-200 font-bold">
+                                                  @ ${formatMoney(sub.price)} × {sub.quantity || 1} = <span className="font-black text-black text-3xl">${formatMoney(Number(sub.price)*Number(sub.quantity||1))}</span>
+                                                </span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                          {(item.contact || item.phone) && (
+                                            <div className="mt-4">
+                                              <span className="text-2xl font-bold text-gray-800 bg-gray-100 inline-block px-4 py-3 border-4 border-gray-400">
+                                                {l('實際窗口:', 'PIC:')} {item.contact || l('未填', 'N/A')} {item.phone && `| 📞 ${item.phone}`}
+                                              </span>
+                                            </div>
+                                          )}
+                                          {item.note && (
+                                            <div className="text-2xl text-gray-700 mt-4 p-5 bg-gray-50 border-4 border-dashed border-gray-400 whitespace-pre-line font-bold">
+                                              <span className="font-black text-black">{l('實際備註：', 'Note: ')}</span>{item.note}
+                                            </div>
+                                          )}
+                                          <div className="mt-8 flex justify-end gap-4 border-t-8 border-gray-100 pt-6">
+                                             <button type="button" onClick={async (e) => { const t=await checkAuth(e); if(t){setEditingActualId(item.id); setEditActualData(item);} }} className="bg-gray-100 text-black border-4 border-black px-8 py-3 text-2xl font-black hover:bg-gray-300 transition-colors">{l('編輯', 'Edit')}</button>
+                                             <button type="button" onClick={(e) => handleDeleteActualItem(item.id, e)} className="bg-red-600 text-white border-4 border-black px-8 py-3 text-2xl font-black hover:bg-red-700 transition-colors shadow-[6px_6px_0px_0px_#000]">{l('移除', 'Remove')}</button>
+                                          </div>
+                                        </>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* ================= 下半部：動態利潤分配區塊 ================= */}
+                        <div className="brutal-box p-8 md:p-12 bg-green-50 shadow-[16px_16px_0px_0px_#000] border-8 border-black">
+                          <div className="flex justify-between items-center border-b-8 border-black pb-8 mb-10">
+                            <div className="flex items-center">
+                              <IconMoney />
+                              <div>
+                                <h2 className="text-5xl md:text-6xl font-black text-black tracking-tight">{l('結算與利潤分配', 'Profit Distribution Matrix')}</h2>
+                                <span className="text-3xl font-black bg-green-600 text-white px-6 py-3 inline-block mt-3 shadow-[6px_6px_0px_0px_#000]">{l('公司額外收入金雞母', 'Corporate Cash Cow')}</span>
+                              </div>
+                            </div>
+                            <button 
+                              type="button" 
+                              onClick={() => setIsRulesEditing(!isRulesEditing)} 
+                              className={`text-2xl font-black px-6 py-3 border-4 border-black shadow-[4px_4px_0px_0px_#000] transition-colors ${isRulesEditing ? 'bg-black text-yellow-300' : 'bg-yellow-300 text-black hover:bg-black hover:text-yellow-300'}`}
+                            >
+                              {isRulesEditing ? l('完成編輯 (請記得按儲存)', 'Finish Editing (Save Required)') : l('編輯各組規範清單', 'Edit Group Rules')}
+                            </button>
+                          </div>
+
+                          <div className="bg-yellow-300 border-8 border-black p-10 transform scale-[1.02] shadow-[12px_12px_0px_0px_#000] mb-16">
+                            <div className="text-3xl font-black text-black mb-6">{l('實際可分配淨利 = 總所得 - 公會代扣 - 實際外包費用', 'Net Distributable Profit = Base - Assoc. Fee - Actual Costs')}</div>
+                            <div className="text-7xl md:text-9xl font-black tracking-tighter drop-shadow-xl">${formatMoney(finance.netProfit)}</div>
+                          </div>
+
+                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            
+                            {/* 總部端 */}
+                            <div className="bg-white border-8 border-black flex flex-col h-full shadow-[8px_8px_0px_0px_#000]">
+                              <div className="bg-purple-200 text-center py-8 border-b-8 border-black">
+                                <h3 className="text-4xl font-black mb-4">{l('1. 總部端 (公司所得)', '1. HQ (Corporate)')}</h3>
+                                <div className="flex justify-center items-center gap-3">
+                                  <input type="number" className="brutal-input w-28 text-center font-black text-4xl border-4 border-black" value={financeSettings.hqPercent} onChange={e=>setFinanceSettings({...financeSettings, hqPercent: e.target.value})} />
+                                  <span className="text-4xl font-black">%</span>
+                                </div>
+                              </div>
+                              <div className="p-8 text-center border-b-8 border-black bg-purple-50">
+                                <div className="text-6xl font-black text-purple-700 tracking-tighter">${formatMoney(finance.hqShare)}</div>
+                              </div>
+                              <div className="p-8 flex-1 text-2xl font-bold text-gray-800 space-y-6 leading-relaxed">
+                                {isRulesEditing ? (
+                                  <>
+                                    <textarea className="w-full border-4 border-black p-3 text-xl font-bold" rows="3" placeholder={l("核心清單 (清空將隱藏)", "Core Tasks (Clear to hide)")} value={financeSettings.rules.hq.core} onChange={e=>handleRuleChange('hq','core',e.target.value)}></textarea>
+                                    <textarea className="w-full border-4 border-black p-3 text-xl font-bold" rows="3" placeholder={l("資金撥款 (清空將隱藏)", "Fund Allocation (Clear to hide)")} value={financeSettings.rules.hq.fund} onChange={e=>handleRuleChange('hq','fund',e.target.value)}></textarea>
+                                    <textarea className="w-full border-4 border-red-600 p-3 text-xl font-bold" rows="3" placeholder={l("防禦機制 (清空將隱藏)", "Defense (Clear to hide)")} value={financeSettings.rules.hq.def} onChange={e=>handleRuleChange('hq','def',e.target.value)}></textarea>
+                                  </>
+                                ) : (
+                                  <>
+                                    {financeSettings.rules.hq.core && <div><span className="bg-black text-white px-3 py-1 mr-2 font-black">{l('核心清單', 'Core Tasks')}</span><br/>{financeSettings.rules.hq.core}</div>}
+                                    {financeSettings.rules.hq.fund && <div><span className="bg-blue-600 text-white px-3 py-1 mr-2 font-black">{l('資金撥款', 'Fund Allocation')}</span><br/>{financeSettings.rules.hq.fund}</div>}
+                                    {financeSettings.rules.hq.def && <div className="bg-gray-100 p-5 border-4 border-gray-400 shadow-[6px_6px_0px_0px_#9ca3af]"><span className="text-red-600 font-black">{l('防禦機制：', 'Defense: ')}</span>{financeSettings.rules.hq.def}</div>}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* 引流端 */}
+                            <div className="bg-white border-8 border-black flex flex-col h-full shadow-[8px_8px_0px_0px_#000]">
+                              <div className="bg-blue-200 text-center py-8 border-b-8 border-black">
+                                <h3 className="text-4xl font-black mb-4">{l('2. 引流端 (案件接洽)', '2. Lead (Acquisition)')}</h3>
+                                <div className="flex justify-center items-center gap-3">
+                                  <input type="number" className="brutal-input w-28 text-center font-black text-4xl border-4 border-black" value={financeSettings.leadPercent} onChange={e=>setFinanceSettings({...financeSettings, leadPercent: e.target.value})} />
+                                  <span className="text-4xl font-black">%</span>
+                                </div>
+                              </div>
+                              <div className="p-8 text-center border-b-8 border-black bg-blue-50">
+                                <div className="text-6xl font-black text-blue-700 tracking-tighter">${formatMoney(finance.leadShare)}</div>
+                              </div>
+                              <div className="p-8 flex-1 text-2xl font-bold text-gray-800 space-y-6 leading-relaxed">
+                                {isRulesEditing ? (
+                                  <>
+                                    <textarea className="w-full border-4 border-black p-3 text-xl font-bold" rows="3" placeholder={l("核心清單 (清空將隱藏)", "Core Tasks (Clear to hide)")} value={financeSettings.rules.lead.core} onChange={e=>handleRuleChange('lead','core',e.target.value)}></textarea>
+                                    <textarea className="w-full border-4 border-black p-3 text-xl font-bold" rows="3" placeholder={l("資金撥款 (清空將隱藏)", "Fund Allocation (Clear to hide)")} value={financeSettings.rules.lead.fund} onChange={e=>handleRuleChange('lead','fund',e.target.value)}></textarea>
+                                    <textarea className="w-full border-4 border-red-600 p-3 text-xl font-bold" rows="3" placeholder={l("防禦機制 (清空將隱藏)", "Defense (Clear to hide)")} value={financeSettings.rules.lead.def} onChange={e=>handleRuleChange('lead','def',e.target.value)}></textarea>
+                                  </>
+                                ) : (
+                                  <>
+                                    {financeSettings.rules.lead.core && <div><span className="bg-black text-white px-3 py-1 mr-2 font-black">{l('核心清單', 'Core Tasks')}</span><br/>{financeSettings.rules.lead.core}</div>}
+                                    {financeSettings.rules.lead.fund && <div><span className="bg-blue-600 text-white px-3 py-1 mr-2 font-black">{l('資金撥款', 'Fund Allocation')}</span><br/>{financeSettings.rules.lead.fund}</div>}
+                                    {financeSettings.rules.lead.def && <div className="bg-gray-100 p-5 border-4 border-gray-400 shadow-[6px_6px_0px_0px_#9ca3af]"><span className="text-red-600 font-black">{l('防禦機制：', 'Defense: ')}</span>{financeSettings.rules.lead.def}</div>}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* 執行端 */}
+                            <div className="bg-white border-8 border-black flex flex-col h-full shadow-[8px_8px_0px_0px_#000]">
+                              <div className="bg-orange-200 text-center py-8 border-b-8 border-black">
+                                <h3 className="text-4xl font-black mb-4">{l('3. 執行端 (鑑定部)', '3. Exec (Appraisal Dept)')}</h3>
+                                <div className="flex justify-center items-center gap-3">
+                                  <input type="number" className="brutal-input w-28 text-center font-black text-4xl border-4 border-black" value={financeSettings.execPercent} onChange={e=>setFinanceSettings({...financeSettings, execPercent: e.target.value})} />
+                                  <span className="text-4xl font-black">%</span>
+                                </div>
+                              </div>
+                              <div className="p-8 text-center border-b-8 border-black bg-orange-50">
+                                <div className="text-6xl font-black text-orange-700 tracking-tighter">${formatMoney(finance.execShare)}</div>
+                              </div>
+                              <div className="p-8 flex-1 text-2xl font-bold text-gray-800 space-y-6 leading-relaxed">
+                                {isRulesEditing ? (
+                                  <>
+                                    <textarea className="w-full border-4 border-black p-3 text-xl font-bold" rows="3" placeholder={l("核心清單 (清空將隱藏)", "Core Tasks (Clear to hide)")} value={financeSettings.rules.exec.core} onChange={e=>handleRuleChange('exec','core',e.target.value)}></textarea>
+                                    <textarea className="w-full border-4 border-black p-3 text-xl font-bold" rows="3" placeholder={l("資金撥款 (清空將隱藏)", "Fund Allocation (Clear to hide)")} value={financeSettings.rules.exec.fund} onChange={e=>handleRuleChange('exec','fund',e.target.value)}></textarea>
+                                    <textarea className="w-full border-4 border-red-600 p-3 text-xl font-bold" rows="3" placeholder={l("防禦機制 (清空將隱藏)", "Defense (Clear to hide)")} value={financeSettings.rules.exec.def} onChange={e=>handleRuleChange('exec','def',e.target.value)}></textarea>
+                                  </>
+                                ) : (
+                                  <>
+                                    {financeSettings.rules.exec.core && <div><span className="bg-black text-white px-3 py-1 mr-2 font-black">{l('核心清單', 'Core Tasks')}</span><br/>{financeSettings.rules.exec.core}</div>}
+                                    {financeSettings.rules.exec.fund && <div><span className="bg-blue-600 text-white px-3 py-1 mr-2 font-black">{l('資金撥款', 'Fund Allocation')}</span><br/>{financeSettings.rules.exec.fund}</div>}
+                                    {financeSettings.rules.exec.def && <div className="bg-gray-100 p-5 border-4 border-gray-400 shadow-[6px_6px_0px_0px_#9ca3af]"><span className="text-red-600 font-black">{l('防禦機制：', 'Defense: ')}</span>{financeSettings.rules.exec.def}</div>}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {!finance.sumValid && (
+                            <div className="mt-10 p-8 bg-red-600 text-white font-black text-4xl text-center border-8 border-black animate-pulse shadow-[12px_12px_0px_0px_#000]">
+                              {l(`⚠️ 警告：分潤比例總和不等於 100% (目前: ${Number(financeSettings.hqPercent || 0) + Number(financeSettings.leadPercent || 0) + Number(financeSettings.execPercent || 0)}%) ⚠️`, `⚠️ WARNING: Shares != 100% (Current: ${Number(financeSettings.hqPercent || 0) + Number(financeSettings.leadPercent || 0) + Number(financeSettings.execPercent || 0)}%) ⚠️`)}
+                            </div>
+                          )}
+
+                          <button type="button" disabled={isSyncing} onClick={handleSaveFinanceSettings} className={`w-full text-white border-8 border-black font-black text-4xl p-8 mt-10 shadow-[12px_12px_0px_0px_#000] transition-colors flex justify-center items-center gap-5 ${isSyncing ? 'bg-gray-500 cursor-not-allowed' : 'bg-green-500 hover:bg-black'}`}>
+                            {isSyncing ? l('處理中...', 'Processing...') : <><IconSave /> {l('儲存結算與分潤設定 (含自訂規範)', 'SAVE FINANCE & RULE SETTINGS')}</>}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          </main>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<ErrorBoundary><App /></ErrorBoundary>);
+  </script>
+</body>
+</html>
